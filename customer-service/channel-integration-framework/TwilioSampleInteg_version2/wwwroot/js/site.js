@@ -126,7 +126,7 @@ class Utility {
      * searchOnly - when 'true', search but do not open the record, when 'false', also open the record
      * SesionBag - The session obj which we maintain to update the name details.
      * recordid - An optional CRM record Id to open. If not passed a search based on current phone number will be performed */
-    static updateCallerDetailsFromCRM(number, searchOnly, sessionBag, recordId, ) {
+    static updateCallerDetailsFromCRM(number, searchOnly, sessionBag, recordId) {
         return new Promise(function (resolve, reject) {
             if (!number) {
                 return reject("number is  empty"); //Not a phone number or another search in progress
@@ -170,7 +170,7 @@ class Utility {
 };
 
 class SessionInfo {
-    constructor(phoneState, sessionid) {
+    constructor(phoneState, sessionid, callDirection) {
         this._name = null;          //Current caller name by searching all contact records based on phone number
         this._contactid = null;     //CRM record ID of contact record for current phone number
         this._number = null;        //Current phone number
@@ -180,6 +180,8 @@ class SessionInfo {
         this._caseId = null;        //Any Case/Incident record created for current phone session
         this.notes = "";
         this.sessionId = sessionid;
+        this.isOldSession = true;
+        this._direction = callDirection; //to be set for each session about how it got created, via incoming or outgoing call
     }
 
     get name() {
@@ -219,10 +221,6 @@ class SessionInfo {
         return this._activityId;
     }
 
-    get currentEnvironment() {
-        return this._environ;
-    }
-
     /* Our handler CIF whenever any navigation happens on main UCI page.
  * In this sample, we simply record the contact or case record Id to be used for our case or activity record creation */
     pageNavigateHandlerSess(paramStr) {
@@ -256,15 +254,15 @@ class SessionInfo {
         //Setup basic details of the activity - subject, direction, duration
         phActivity["phonenumber"] = this._number;
         phActivity["subject"] = "Call with " + this.name;
-        phActivity["directioncode"] = phone.direction == CallDirection.Incoming ? false : true;
+        phActivity["directioncode"] = this.direction == CallDirection.Incoming ? false : true;
         phActivity["actualdurationminutes"] = Math.trunc(this._timer.duration / 60);
         //Capture any call notes as 'description' attribute of the activity
         phActivity["description"] = $('#callNotesField').text();
 
 
         var sysuser = null;
-        if (this.currentEnvironment) {
-            sysuser = Utility.stripParens(this.currentEnvironment.userId);
+        if (phone.currentEnvironment) {
+            sysuser = Utility.stripParens(phone.currentEnvironment.userId);
         }
 
         var us = {};
@@ -323,7 +321,7 @@ class SessionInfo {
         if (this.state != PhoneState.Ongoing) {
             return;
         }
-        Utility.updateCallerDetailsFromCRM(this._number, false, this);
+        Utility.updateCallerDetailsFromCRM(this._number, this.isOldSession, this);
         log("Initiated CRM page update");
     }
 
@@ -492,7 +490,6 @@ class Phone {
         }.bind(this));
     }
 
-
     get conn() {
         return this._conn;
     }
@@ -516,6 +513,9 @@ class Phone {
         //this.render();
     }
 
+    get currentEnvironment() {
+        return this._environ;
+    }
 }
 
 /* Programatically set the panel mode using CIF */
@@ -576,6 +576,24 @@ function sendKBArticleHandler(paramStr) {
     });
 }
 
+/* Our clickToAct handler. This will place a phone call and change the phone state accordingly */
+function clickToActHandler(paramStr) {
+    return new Promise(function (resolve, reject) {
+        try {
+            let params = JSON.parse(paramStr);
+            var phNo = params.value;   //Retrieve the phone number to dial from parameters passed by CIF
+            log("Click To Act placing a phone call to " + phNo);
+            $("#dialerPhoneNumber").val(phNo);
+            expandPanel();  //Programatically expand the panel if required
+            placeCall();    //Make the call
+            resolve(true);
+        }
+        catch (error) {
+            reject(error);
+        }
+    });
+
+}
 /* Our handler invoked by CIF when the user changes panel mode */
 function modeChangedHandler(paramStr) {
     return new Promise(function (resolve, reject) {
@@ -612,7 +630,7 @@ function notificationCIF(number) {
     Utility.updateCallerDetailsFromCRM(number, true).then((result) => {
         console.log(result);
         var input = {
-            templateName: "IncomingCallNotification",
+            templateName: "sample_IncomingCallNotification",
             templateParameters: {
                 number: result.value
             }
@@ -674,11 +692,11 @@ function answerCall() {
         num = num.substring(1);
     }
     var inputBag = {
-        "templateName": "TwilioCallSessionTemplate", "templateParameters": {}, "customer": num
+        "templateName": "sample_TwilioCallSessionTemplate", "templateParameters": {}, "customer": num
     };
     Microsoft.CIFramework.createSession(inputBag).then(
         (sessionId) => {
-            var sessionPh = new SessionInfo(PhoneState.CallAccepted, sessionId);
+            var sessionPh = new SessionInfo(PhoneState.CallAccepted, sessionId, CallDirection.Incoming);
             sessionPh.name = phone.conn.parameters.From;
             log("Accepting incoming call from " + sessionPh.name);
             if (phone.conn) {
@@ -696,7 +714,7 @@ function answerCall() {
                     },
                         (error) => {
                             console.log(error);
-                    });
+                        });
                 } else {
                     console.log('Caller details could not be fetched from CRM, skipping updateConversation api calls.');
                 }
@@ -720,8 +738,30 @@ function declineCall() {
 /* Our callback to be invoked by Twilio when a call is successfully connected */
 function ongoingCall() {
     var sess = phone.listOfSessions.get(phone.currentCallSessioId);
-    sess.state = PhoneState.Ongoing;
-    log("Ongoing call with " + sess.name);
+    if (sess == null || sess === undefined) {
+        var inputBag = {
+            "templateName": "sample_TwilioCallSessionTemplate", "templateParameters": {}, "customerName": phone.name
+        };
+        Microsoft.CIFramework.createSession(inputBag).then(
+            (sessionId) => {
+                var sessionPh = new SessionInfo(PhoneState.Dialing, sessionId, CallDirection.None);
+                sessionPh.name = phone.name;
+                log("Dialing " + sessionPh.name);
+                $('#callNotesField').text("");
+                phone.listOfSessions.set(sessionId, sessionPh);
+                phone.currentCallSessioId = sessionId;
+                sessionPh.isOldSession = false;
+                sessionPh.state = PhoneState.Ongoing;
+            },
+            (error) => {
+                log("Error in session creation for dialing " + sessionPh.name , error);
+            });
+    }
+    else {
+        sess.isOldSession = true;
+        sess.state = PhoneState.Ongoing;
+        log("Ongoing call with " + sess.name);
+    }
 }
 
 /* Event handler for when the user clicks on the "hang up" button */
@@ -731,6 +771,19 @@ function hangupCall() {
     log("Hanging up call with " + sess.name);
 }
 
+/* Event handler to be invoked when the user wishes to place a call via either "clickToAct" or using our rudimentary dialer */
+function placeCall() {
+    if (phone.busy) {
+        throw new Error("Cannot place call. Phone busy");
+    }
+    var params = {
+        To: "+" + document.getElementById('dialerPhoneNumber').value
+    };
+    log('Placing a call to ' + params.To + '...');
+    phone.name = params.To;
+
+    Twilio.Device.connect(params);
+}
 /** Event handler when the user clicks on bing button.*/
 function searchBing() {
     Microsoft.CIFramework.getFocusedSession().then((sessionId) => {
@@ -781,7 +834,7 @@ function createCase() {
                 var res = JSON.parse(result);
                 sessionI.currentCase = res.id
                 var input = {
-                    templateName: "entityrecord",
+                    templateName: "sample_entityrecord",
                     templateParameters: {
                         entityName: "incident",
                         entityId: res.id,
@@ -934,6 +987,8 @@ function updateActivity() {
 /* Initialization function for this application.
  * Registers handlers for various CIF events */
 function initCTI() {
+    Microsoft.CIFramework.setClickToAct(true);
+    Microsoft.CIFramework.addHandler("onclicktoact", clickToActHandler);
     Microsoft.CIFramework.addHandler("onmodechanged", modeChangedHandler);
     Microsoft.CIFramework.addHandler("onpagenavigate", pageNavigateHandler);
     Microsoft.CIFramework.addHandler("onsendkbarticle", sendKBArticleHandler);
@@ -1102,7 +1157,7 @@ function updateConversation(inputMap) {
                     });
             } else {
                 console.log("A live workitem is not available for this session, skipping updateConversation api calls.");
-            }  
+            }
         },
             (error) => {
                 console.log(error);

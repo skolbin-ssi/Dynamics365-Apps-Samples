@@ -1,3 +1,14 @@
+---
+languages:
+- csharp
+products:
+- dynamics-sales
+page_type: sample
+level: beginner
+role: developer
+description: "Sample that shows how to create a sales order and then close it by fulfilling it in Dynamics 365 Sales."
+---
+
 # Fulfill a sales order
 
 This sample shows how to create a sales order and then close it by fulfilling it.

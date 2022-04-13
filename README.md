@@ -5,7 +5,7 @@ This repo provides samples for apps, solutions, and related services for Dynamic
 ## Related samples repos
 
 - AL language code samples for Dynamics 365 Business Central: <https://github.com/Microsoft/AL>.
-- PowerApps and Common Data Service samples: <https://github.com/Microsoft/PowerApps-Samples>.
+- Power Apps and Dataverse samples: <https://github.com/Microsoft/PowerApps-Samples>.
 
 ## Contributing
 
@@ -19,4 +19,4 @@ provided by the bot. You will only need to do this once across all repos using o
 
 This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/).
 For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or
-contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
+contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments . 
